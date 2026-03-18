@@ -12,26 +12,106 @@
     canvas {
       border: 1px solid #444;
       margin-top: 10px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    select, input {
+      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
 
 <h2>Quantum Treasure Hunt</h2>
-<p>Move mouse to scan | Use ← → to change frequency</p>
 
+<p>
+Scan the field using light. Match the wavelength to detect hidden quantum particles.<br>
+Score points by finding particles quickly. Reach <b>30 points</b> to advance levels.<br>
+Higher levels introduce entanglement, barriers, motion, and superposition.<br>
+Press <b>R</b> to reveal particles briefly with a quantum pulse.
+</p>
+
+<label>Level:</label>
+<select id="levelSelect">
+  <option value="1">1 (Easy)</option>
+  <option value="2">2</option>
+  <option value="3">3</option>
+  <option value="4">4</option>
+  <option value="5">5</option>
+</select>
+
+<br>
+
+<label>Wavelength (nm):</label>
+<input type="range" id="freq" min="400" max="700" value="550">
+<span id="freqVal">550</span>
+
+<br>
+<!-- Spectrum bar -->
+<canvas id="spectrum" width="700" height="40"></canvas>
+
+<!-- Main game canvas -->
 <canvas id="game" width="700" height="450"></canvas>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-let mouse = { x: 350, y: 225 };
-let frequency = 50;
+const spectrumCanvas = document.getElementById("spectrum");
+const sctx = spectrumCanvas.getContext("2d");
 
+let mouse = { x: 350, y: 225 };
+let wavelength = 550;
 let score = 0;
 let level = 1;
-let levelStartTime = Date.now();
+
+const slider = document.getElementById("freq");
+const freqVal = document.getElementById("freqVal");
+const levelSelect = document.getElementById("levelSelect");
+
+slider.oninput = () => {
+  wavelength = parseInt(slider.value);
+  freqVal.textContent = wavelength;
+};
+
+levelSelect.onchange = () => {
+  level = parseInt(levelSelect.value);
+  score = 0;
+  createLevel(level);
+  levelSelect.blur(); // remove focus to avoid arrow key conflict
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    e.preventDefault();
+    if (e.key === "ArrowLeft") wavelength -= 5;
+    if (e.key === "ArrowRight") wavelength += 5;
+    wavelength = Math.max(400, Math.min(700, wavelength));
+    slider.value = wavelength;
+    freqVal.textContent = wavelength;
+  }
+
+  // Quantum reveal pulse
+  if (e.key.toLowerCase() === "r") {
+    particles.forEach(p => {
+      if (!p.found) {
+        revealTimer[p.id] = 60; // 1 second at 60fps
+        // small random velocity burst
+        const burst = 1 + level*0.2; 
+        if (!p.isSuper) {
+          p.vx += (Math.random() - 0.5) * burst;
+          p.vy += (Math.random() - 0.5) * burst;
+        } else {
+          p.states.forEach(s => {
+            s.vx = (Math.random() - 0.5) * burst;
+            s.vy = (Math.random() - 0.5) * burst;
+          });
+        }
+      }
+    });
+  }
+});
 
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
@@ -39,78 +119,125 @@ canvas.addEventListener("mousemove", (e) => {
   mouse.y = e.clientY - rect.top;
 });
 
-// Keyboard control
-document.addEventListener("keydown", (e) => {
-  if (e.key === "ArrowLeft") frequency -= 2;
-  if (e.key === "ArrowRight") frequency += 2;
-  frequency = Math.max(0, Math.min(100, frequency));
-});
-
-// Barriers
+let particles = [];
 let barriers = [];
 
 function createLevel(lvl) {
-  levelStartTime = Date.now();
-
-  // Create particles
-  particles = Array.from({ length: 4 + lvl }, () => ({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
-    freq: Math.random() * 100,
-    vx: (Math.random() - 0.5) * (1 + lvl * 0.3),
-    vy: (Math.random() - 0.5) * (1 + lvl * 0.3),
-    found: false,
-    tunnelling: lvl >= 3 && Math.random() < 0.4
-  }));
-
-  // Create barriers
+  particles = [];
   barriers = [];
+
+  for (let i = 0; i < 4 + lvl; i++) {
+    let isSuper = lvl >= 4 && Math.random() < 0.4;
+
+    particles.push({
+      id: i,
+      wavelength: 400 + Math.random() * 300,
+      found: false,
+      entangledWith: null,
+      progress: 0,
+      isSuper: isSuper,
+      states: isSuper ? [
+        {x: Math.random()*700, y: Math.random()*450, vx:0, vy:0},
+        {x: Math.random()*700, y: Math.random()*450, vx:0, vy:0},
+        {x: Math.random()*700, y: Math.random()*450, vx:0, vy:0}
+      ] : null,
+      realIndex: isSuper ? Math.floor(Math.random()*3) : 0,
+      x: Math.random()*700,
+      y: Math.random()*450,
+      vx: lvl >= 3 ? (Math.random()-0.5)*(0.5+lvl*0.1) : 0, // slower base motion
+      vy: lvl >= 3 ? (Math.random()-0.5)*(0.5+lvl*0.1) : 0
+    });
+  }
+
+  // Entanglement for levels 2+
   if (lvl >= 2) {
+    for (let i = 0; i < particles.length-1; i+=3) {
+      particles[i].entangledWith = i+1;
+      particles[i+1].entangledWith = i;
+    }
+  }
+
+  // Barriers for levels 3+
+  if (lvl >= 3) {
     for (let i = 0; i < lvl; i++) {
       barriers.push({
-        x: Math.random() * 600,
-        y: Math.random() * 350,
-        w: 80,
-        h: 20
+        x: Math.random()*600,
+        y: Math.random()*350,
+        w: 100,
+        h: 25
       });
     }
   }
 }
 
-let particles = [];
 createLevel(level);
 
-function colorFromFrequency(f) {
-  // Map 0–100 → pink (IR) to blue (UV)
-  const hue = 300 - (f * 2.4); // pink → blue
+// Map wavelength to visible color
+function wavelengthToColor(wl) {
+  let hue = (700 - wl) * 0.8;
   return `hsl(${hue}, 100%, 60%)`;
 }
+
+// Spectrum drawing
+function drawSpectrum() {
+  const gradient = sctx.createLinearGradient(0, 0, spectrumCanvas.width, 0);
+  gradient.addColorStop(0.0, "blue");
+  gradient.addColorStop(0.25, "cyan");
+  gradient.addColorStop(0.5, "green");
+  gradient.addColorStop(0.65, "yellow");
+  gradient.addColorStop(0.8, "orange");
+  gradient.addColorStop(1.0, "red");
+  sctx.fillStyle = gradient;
+  sctx.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+
+  // Marker
+  const x = ((wavelength - 400)/300) * spectrumCanvas.width;
+  sctx.strokeStyle = "white";
+  sctx.lineWidth = 3;
+  sctx.beginPath();
+  sctx.moveTo(x, 0);
+  sctx.lineTo(x, spectrumCanvas.height);
+  sctx.stroke();
+
+  // Labels
+  sctx.fillStyle = "white";
+  sctx.font = "12px sans-serif";
+  sctx.fillText("400 nm", 5, 35);
+  sctx.fillText("700 nm", spectrumCanvas.width - 55, 35);
+}
+
+let revealTimer = {};
 
 function updateParticles() {
   particles.forEach(p => {
     if (p.found) return;
 
-    p.x += p.vx;
-    p.y += p.vy;
+    if (!p.isSuper) {
+      p.x += p.vx;
+      p.y += p.vy;
+    } else {
+      p.states.forEach(s => {
+        s.x += s.vx;
+        s.y += s.vy;
+      });
+    }
 
-    // Wall bounce
-    if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-    if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+    // bounce off walls
+    if (!p.isSuper) {
+      if (p.x<0||p.x>canvas.width) p.vx*=-1;
+      if (p.y<0||p.y>canvas.height) p.vy*=-1;
+    } else {
+      p.states.forEach(s => {
+        if (s.x<0||s.x>canvas.width) s.vx*=-1;
+        if (s.y<0||s.y>canvas.height) s.vy*=-1;
+      });
+    }
 
-    // Barrier interaction
+    // barrier collisions
     barriers.forEach(b => {
-      const inside =
-        p.x > b.x && p.x < b.x + b.w &&
-        p.y > b.y && p.y < b.y + b.h;
-
-      if (inside) {
-        if (p.tunnelling && Math.random() < 0.02) {
-          // tunnel through (do nothing)
-        } else {
-          p.vx *= -1;
-          p.vy *= -1;
-        }
-      }
+      const check = pos => pos.x>b.x && pos.x<b.x+b.w && pos.y>b.y && pos.y<b.y+b.h;
+      if (!p.isSuper && check(p)) {p.vx*=-1; p.vy*=-1;}
+      if (p.isSuper) p.states.forEach(s=>{if(check(s)){s.vx*=-1; s.vy*=-1}});
     });
   });
 }
@@ -118,6 +245,7 @@ function updateParticles() {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  drawSpectrum();
   updateParticles();
 
   let closestSignal = 0;
@@ -125,64 +253,96 @@ function draw() {
   particles.forEach(p => {
     if (p.found) return;
 
-    const dx = p.x - mouse.x;
-    const dy = p.y - mouse.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const freqDiff = Math.abs(p.freq - frequency);
+    let bestSignal = 0;
+    let bestIndex = 0;
 
-    const signal =
-      Math.max(0, 1 - dist / 120) *
-      Math.max(0, 1 - freqDiff / 25);
+    let positions = p.isSuper ? p.states : [{x:p.x,y:p.y}];
 
-    if (signal > 0.8) {
-      // Found particle
+    positions.forEach((pos,i) => {
+      const dx = pos.x - mouse.x;
+      const dy = pos.y - mouse.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const freqDiff = Math.abs(p.wavelength - wavelength);
+
+      const signal =
+        Math.max(0, 1 - dist/140) *
+        Math.max(0, 1 - freqDiff/40);
+
+      if (signal > bestSignal) { bestSignal = signal; bestIndex = i; }
+
+      // faint ghost states for superposition
+      if (p.isSuper && signal > 0.4 || revealTimer[p.id] > 0) {
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = wavelengthToColor(p.wavelength);
+        ctx.beginPath();
+        ctx.arc(pos.x,pos.y,10,0,Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    });
+
+    // build measurement
+    if (bestSignal > 0.7) p.progress += 0.02;
+    else p.progress *= 0.95;
+
+    // collapse particle
+    if (p.progress > 1) {
       p.found = true;
-
-      let timeTaken = (Date.now() - levelStartTime) / 1000;
-      score += Math.max(10, Math.floor(100 - timeTaken * 5));
+      score += 10;
+      if (p.entangledWith !== null) revealTimer[p.entangledWith] = 60;
     }
 
-    if (signal > 0.6) {
-      ctx.fillStyle = colorFromFrequency(p.freq);
+    // draw locked particle
+    if (!p.isSuper && bestSignal > 0.6 || revealTimer[p.id] > 0) {
+      ctx.fillStyle = wavelengthToColor(p.wavelength);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.arc(p.x,p.y,10,0,Math.PI*2);
       ctx.fill();
     }
 
-    closestSignal = Math.max(closestSignal, signal);
+    // superposition collapsed
+    if (p.isSuper && p.progress > 0.3) {
+      let pos = p.states[bestIndex];
+      ctx.fillStyle = wavelengthToColor(p.wavelength);
+      ctx.beginPath();
+      ctx.arc(pos.x,pos.y,12,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    if (revealTimer[p.id] > 0) revealTimer[p.id]--;
+
+    closestSignal = Math.max(closestSignal, bestSignal);
   });
 
-  // Draw barriers
+  // barriers
   ctx.fillStyle = "#555";
-  barriers.forEach(b => {
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-  });
+  barriers.forEach(b => ctx.fillRect(b.x,b.y,b.w,b.h));
 
-  // Torch wiggle
-  let wiggle = closestSignal * 8;
-
+  // torch
+  let wiggle = closestSignal * 10;
   ctx.beginPath();
   ctx.arc(
-    mouse.x + (Math.random() - 0.5) * wiggle,
-    mouse.y + (Math.random() - 0.5) * wiggle,
-    20,
+    mouse.x + (Math.random()-0.5)*wiggle,
+    mouse.y + (Math.random()-0.5)*wiggle,
+    30,
     0,
-    Math.PI * 2
+    Math.PI*2
   );
-
-  ctx.strokeStyle = colorFromFrequency(frequency);
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = wavelengthToColor(wavelength);
+  ctx.lineWidth = 3;
   ctx.stroke();
 
-  // UI text
+  // UI
   ctx.fillStyle = "white";
   ctx.fillText("Score: " + score, 10, 20);
   ctx.fillText("Level: " + level, 10, 40);
-  ctx.fillText("Freq: " + Math.floor(frequency), 10, 60);
+  ctx.fillText("Signal: " + closestSignal.toFixed(2), 10, 60);
 
-  // Level complete
-  if (particles.every(p => p.found)) {
+  // Level progression
+  if (score >= 30) {
     level++;
+    levelSelect.value = level;
+    score = 0;
     createLevel(level);
   }
 
@@ -191,6 +351,5 @@ function draw() {
 
 draw();
 </script>
-
 </body>
 </html>
