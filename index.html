@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Quantum Treasure Hunt</title>
+  <style>
+    body {
+      background: #111;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      border: 1px solid #444;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Quantum Treasure Hunt</h2>
+<p>Move mouse to scan | Use ← → to change frequency</p>
+
+<canvas id="game" width="700" height="450"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let mouse = { x: 350, y: 225 };
+let frequency = 50;
+
+let score = 0;
+let level = 1;
+let levelStartTime = Date.now();
+
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+
+// Keyboard control
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") frequency -= 2;
+  if (e.key === "ArrowRight") frequency += 2;
+  frequency = Math.max(0, Math.min(100, frequency));
+});
+
+// Barriers
+let barriers = [];
+
+function createLevel(lvl) {
+  levelStartTime = Date.now();
+
+  // Create particles
+  particles = Array.from({ length: 4 + lvl }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    freq: Math.random() * 100,
+    vx: (Math.random() - 0.5) * (1 + lvl * 0.3),
+    vy: (Math.random() - 0.5) * (1 + lvl * 0.3),
+    found: false,
+    tunnelling: lvl >= 3 && Math.random() < 0.4
+  }));
+
+  // Create barriers
+  barriers = [];
+  if (lvl >= 2) {
+    for (let i = 0; i < lvl; i++) {
+      barriers.push({
+        x: Math.random() * 600,
+        y: Math.random() * 350,
+        w: 80,
+        h: 20
+      });
+    }
+  }
+}
+
+let particles = [];
+createLevel(level);
+
+function colorFromFrequency(f) {
+  // Map 0–100 → pink (IR) to blue (UV)
+  const hue = 300 - (f * 2.4); // pink → blue
+  return `hsl(${hue}, 100%, 60%)`;
+}
+
+function updateParticles() {
+  particles.forEach(p => {
+    if (p.found) return;
+
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Wall bounce
+    if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+    if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+    // Barrier interaction
+    barriers.forEach(b => {
+      const inside =
+        p.x > b.x && p.x < b.x + b.w &&
+        p.y > b.y && p.y < b.y + b.h;
+
+      if (inside) {
+        if (p.tunnelling && Math.random() < 0.02) {
+          // tunnel through (do nothing)
+        } else {
+          p.vx *= -1;
+          p.vy *= -1;
+        }
+      }
+    });
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  updateParticles();
+
+  let closestSignal = 0;
+
+  particles.forEach(p => {
+    if (p.found) return;
+
+    const dx = p.x - mouse.x;
+    const dy = p.y - mouse.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const freqDiff = Math.abs(p.freq - frequency);
+
+    const signal =
+      Math.max(0, 1 - dist / 120) *
+      Math.max(0, 1 - freqDiff / 25);
+
+    if (signal > 0.8) {
+      // Found particle
+      p.found = true;
+
+      let timeTaken = (Date.now() - levelStartTime) / 1000;
+      score += Math.max(10, Math.floor(100 - timeTaken * 5));
+    }
+
+    if (signal > 0.6) {
+      ctx.fillStyle = colorFromFrequency(p.freq);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    closestSignal = Math.max(closestSignal, signal);
+  });
+
+  // Draw barriers
+  ctx.fillStyle = "#555";
+  barriers.forEach(b => {
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  });
+
+  // Torch wiggle
+  let wiggle = closestSignal * 8;
+
+  ctx.beginPath();
+  ctx.arc(
+    mouse.x + (Math.random() - 0.5) * wiggle,
+    mouse.y + (Math.random() - 0.5) * wiggle,
+    20,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.strokeStyle = colorFromFrequency(frequency);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // UI text
+  ctx.fillStyle = "white";
+  ctx.fillText("Score: " + score, 10, 20);
+  ctx.fillText("Level: " + level, 10, 40);
+  ctx.fillText("Freq: " + Math.floor(frequency), 10, 60);
+
+  // Level complete
+  if (particles.every(p => p.found)) {
+    level++;
+    createLevel(level);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+
+</body>
+</html>
